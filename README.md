@@ -17,3 +17,15 @@ lndlsoaimd.csv | The score and ranking of the Index of multiple deprivation for 
 lookup.csv | Lookup table to link LSOAs and MSOAs | https://github.com/gasparrini/CTS-smallarea | 
 land-area-population-density-lsoa11-msoa11.xlsx | Population data of the MSOAs of London in 2014 | https://data.london.gov.uk/dataset/super-output-area-population-lsoa-msoa-london |
 
+## Rcode
+The Rcode used in this paper is structured in several files:
+| File | Description |
+| --- | --- | 
+| DLNM_Laplace.R | Function to fit the Laplacian-P-splines model without offset |
+| DLNM_Laplace_offset.R | Function to fit the Laplacian-P-splines model with offset |
+| af_Laplace.R | Function to calculate the attributable fraction using the Laplacian-P-splines model |
+| predRR.R | Function to predict the RR using the Laplacian-P-splines model |
+| simulation_one_ts_Gasparrini.R | Simulations Situation 1: One time series (inspired by the simulation study of Gasparrini) |
+| simulation_multiple_ts_randintercept.R | Simulations Situation 2: Multiple time series with an independent random intercept for every area |
+| simulation_multiple_ts_Leroux.R | Simulations Situation 3: Multiple time series with an area-specific Leroux random effect |
+| data_application.R | Full analysis of data application on number of deaths in London |
