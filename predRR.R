@@ -60,5 +60,6 @@ predRR <- function(model,at_x,cen, L){
                  "Xpredall" = Xpredall,
                  "Qlower_all" = Qlower_all,
                  "Qupper_all" = Qupper_all,
-                 "pred_all" = pred_all)
+                 "pred_all" = pred_all,
+                 "sd_all" = sd_all)
 }
