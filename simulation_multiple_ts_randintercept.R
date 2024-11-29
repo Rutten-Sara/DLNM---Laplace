@@ -8,9 +8,6 @@ library(data.table)
 ################################################################################
 # PREPARE TIME SERIES DATA
 ################################################################################
-setwd("G:/My Drive/Onderzoek/DLNM/DLNM Laplace/Final code")
-
-
 source('DLNM_Laplace.R')
 source('predRR.R')
 
