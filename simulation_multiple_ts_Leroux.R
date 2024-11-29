@@ -168,7 +168,7 @@ Laplace_lag <- gam_lag <- matrix(0,ncol=nsample, nrow=L+1)
 
 # Spatial random effect simulation
 
-unzip("G:/My Drive/Onderzoek/DLNM/DLNM Laplace/Final code/data/lndmsoashp.zip")
+unzip("data/lndmsoashp.zip")
 map <- st_read("lndmsoashp.shp")
 
 neig.map <- spdep::poly2nb(map,row.names = map$MSOA11CD)
