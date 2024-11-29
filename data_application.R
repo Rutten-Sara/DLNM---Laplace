@@ -1,7 +1,6 @@
 rm(list = ls())
 library(tidyverse) ; library(readxl)
 
-setwd("G:/My Drive/Onderzoek/DLNM/DLNM Laplace/Final code")
 source('DLNM_Laplace_offset.R')
 source('predRR.R')
 
