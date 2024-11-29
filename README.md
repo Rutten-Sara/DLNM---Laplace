@@ -9,7 +9,7 @@ Following datasets are necessary to run the code and are included in the data fo
 
 | Dataset | Description | Downloaded from |
 | --- | --- | --- |
-lndmsoadeath.csv | number of deaths for each MSOA in London | https://github.com/gasparrini/CTS-smallarea |
+lndmsoadeath.csv | Number of deaths for each MSOA in London | https://github.com/gasparrini/CTS-smallarea |
 lndmaxgrid.nc | 1x1 km gridded spatio-temporal data of maximum temperature in London | https://github.com/gasparrini/CTS-smallarea |
 lndmingrid.nc | 1x1 km gridded spatio-temporal data of minimum temperature in London | https://github.com/gasparrini/CTS-smallarea |
 lndmsoashp.zip | Spatial boundaries of the MSOAs of London | https://github.com/gasparrini/CTS-smallarea |
