@@ -61,7 +61,9 @@ DLNM_Laplace <- function(model,
   
   if(!missing(ID)){
     atau <- btau <- 10^(-5)
-    a.rho <- b.rho <- 0.5
+    a.rho <- b.rho <- 1/2
+    #a_idd <- 10
+    #b_idd <- 0.1
     if(!missing(data)){
       Z.rand <- Matrix::sparse.model.matrix(~ as.factor(ID) + 0, data)[!is.na(crossbasis[,1]),] # model matrix for random effects
     } else {
@@ -134,15 +136,26 @@ DLNM_Laplace <- function(model,
       Rn <- Matrix::Matrix(Rn, sparse = TRUE)
       
       Gv <- function(v) exp(v[4])*(Matrix::Diagonal(n = q.rand, 
-                                         x = 1 - exp(v[5])/(1+exp(v[5]))) + 
+                                          x = 1 - exp(v[5])/(1+exp(v[5]))) + 
         Matrix::Matrix(exp(v[5])/(1+exp(v[5]))*Rn, sparse = T))
       Lv <- function(v) (Matrix::Diagonal(n = q.rand, 
                                                     x = 1 - exp(v[5])/(1+exp(v[5]))) + 
                                      Matrix::Matrix(exp(v[5])/(1+exp(v[5]))*Rn, sparse = T))
+      
+      # Gv <- function(v) exp(v[4])*(Matrix::Diagonal(n = q.rand, 
+      #                                              x = 1 - (1-exp(-exp(v[5])))) + 
+      #                               Matrix::Matrix((1-exp(-exp(v[5])))*Rn, sparse = T))
+      #Lv <- function(v) (Matrix::Diagonal(n = q.rand, 
+      #                                    x = 1 - (1-exp(-exp(v[5])))) + 
+      #                     Matrix::Matrix((1-exp(-exp(v[5])))*Rn, sparse = T))
+      
+      
       logpv.rand <- function(v)  {
         value <- 0.5 * nu * v[4] - (0.5*nu + a)*log(b + 0.5*nu*exp(v[4])) + 
-          0.5*sum(sapply(eigen(Lv(v),only.values = T)$values,log)) + 
+          #a_idd * v[4] - b_idd * exp(v[4]) +
+          0.5*sum(sapply(eigen(Gv(v),only.values = T)$values,log)) + 
           a.rho*v[5] - (a.rho + b.rho)*log(1 + exp(v[5]))
+        #(a.rho-1)*log(1-exp(-exp(v[5])))-b.rho*exp(v[5])+v[5]
         return(as.numeric(value))}
       v.rand <- c(1,1)
       }
