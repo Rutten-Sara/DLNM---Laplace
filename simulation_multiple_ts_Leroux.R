@@ -1,4 +1,3 @@
-setwd("G:/My Drive/Onderzoek/DLNM/DLNM Laplace/Submission/Biostatistics/DLNM---Laplace-main")
 rm(list = ls())
 library(splines); library(dlnm); library(tsModel); library(biglm);  library(MASS); library(tidyverse); library(plot3D)
 library(mgcv); library(nlraa)
