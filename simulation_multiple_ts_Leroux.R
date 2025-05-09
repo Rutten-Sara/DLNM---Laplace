@@ -1,14 +1,14 @@
-
+setwd("G:/My Drive/Onderzoek/DLNM/DLNM Laplace/Submission/Biostatistics/DLNM---Laplace-main")
 rm(list = ls())
 library(splines); library(dlnm); library(tsModel); library(biglm);  library(MASS); library(tidyverse); library(plot3D)
 library(mgcv); library(nlraa)
-library(Matrix)
+library(Matrix); library(R.utils)
 library(data.table)
 
 ################################################################################
 # PREPARE TIME SERIES DATA
 ################################################################################
-source('DLNM_Laplace.R')
+source('DLNM_Laplace_offset.R')
 source('predRR.R')
 
 
@@ -121,15 +121,16 @@ names(trueeff) <- names(combsim)
 fcumeff <- function(hist,lag,fun) sum(do.call(fun,list(hist,lag)))
 
 
-ind = 1
+ind = 3
 cumeff <- apply(Q,1,fcumeff,0:40,combsim[ind])
 
 # NUMBER OF ITERATIONS 
-nsim <- 1000
-nsample <- 25
+nsim <- 50
+nsample <- 50
 
 # BASELINE
-base <- c(90,270,130)
+#base <- c(90,270,130)
+base <- c(0.01,0.01,0.01)
 
 # NOMINAL VALUE
 qn <- qnorm(0.975)
@@ -159,12 +160,20 @@ rmse_all_gam <- rep(0,dim(trueeff$Temperature)[1])
 time_gam <- NULL
 
 
+cov_re_Laplace <- rmse_re_Laplace <- numeric(length(unique(datafull$ID)))
+cov_mu_Laplace <- rmse_mu_Laplace <- numeric(sum(!is.na(cumeff)))
+cov_re_gam <- rmse_re_gam <- numeric(length(unique(datafull$ID)))
+cov_mu_gam <- rmse_mu_gam <- numeric(sum(!is.na(cumeff)))
+
+
 # Plots
 pred_Laplace.meanx <- pred_gam.meanx <- rep(0,length(seq(0,10,0.25) ))
 pred_Laplace.meanlag <- pred_gam.meanlag <- rep(0,L+1)
 Laplace_x <- gam_x <- matrix(0,ncol=nsample, nrow=length(seq(0,10,0.25) ))
 Laplace_lag <- gam_lag <- matrix(0,ncol=nsample, nrow=L+1)
 
+spatial_effect <- numeric(nsim)
+spatial_var <- numeric(nsim)
 
 # Spatial random effect simulation
 
@@ -188,16 +197,20 @@ for (s in 1:S) {
 }
 Rn <- Matrix::Matrix(Rn, sparse = TRUE)
 
-var_true = 0.1^2
+var_true = 0.5
 Q_spat <- var_true * solve(Matrix::Diagonal(n = S, 
-                                            x = 1 - 0.9) + 
-                             Matrix::Matrix(0.9*Rn, sparse = T)) 
+                                            x = 1 - 0.95) + 
+                             Matrix::Matrix(0.95*Rn, sparse = T)) 
 
 eigen <- eigen(Q_spat)
 set.seed(1)
 X <- matrix(rnorm(S*nsim),nsim)
 spat_sim <- eigen$vectors %*% diag(sqrt(eigen$values),S) %*% t(X)
 
+offset_true = ceiling(rgamma(length(unique(datafull$MSOA11CD)),1,0.05))
+
+map$re = spat_sim[,1]
+plot(map[,"re"])
 
 for (i in 1:nsim){
   if (round(i/10)==i/10){print(i)}
@@ -206,13 +219,16 @@ for (i in 1:nsim){
   
   set.seed(12805+i)
   
-  unique_area = data.frame(area = unique(datafull$MSOA11CD))
+  unique_area = data.frame(area = unique(datafull$MSOA11CD), offset = offset_true)
   unique_area$random_effect = spat_sim[,i]
   
   random_area = inner_join(data.frame(area = datafull$MSOA11CD), unique_area,
                            by = "area")$random_effect
   
-  suppressWarnings(y_all <- rpois(length(x),exp(log(base[ind])+cumeff+random_area))) 
+  offset = inner_join(data.frame(area = datafull$MSOA11CD), unique_area,
+                           by = "area")$offset
+  
+  suppressWarnings(y_all <- rpois(length(x),offset*exp(log(base[ind])+cumeff+random_area))) 
   mu <- exp(log(base[ind])+cumeff+random_area)
   
   #cor(na.omit(log(y_all+1)),na.omit(log(mu+1)))
@@ -220,6 +236,40 @@ for (i in 1:nsim){
 
   crossbasis <- crossbasis(x, argvar=list(df=vx, fun="ps", intercept=F),
                            arglag=list(df=vl, fun="ps",intercept=T), lag=L, group=group)
+  
+  # Fit bam model
+  Slag2 <-  diag((0:(vl-1))^2)
+  cbPen <- cbPen(crossbasis,addSlag=list(Slag2)) 
+  
+  ID_gam = as.factor(datafull$ID)
+  
+  mtime <- proc.time()
+  
+  gam_try = tryCatch(
+    {
+      model_gam<-withTimeout(
+        bam(y_all ~ crossbasis+ s(ID_gam, bs="re")+offset(log(offset)),family=poisson(),
+            paraPen=list(crossbasis=cbPen)),
+        timeout = 30*60,
+        onTimeout = "error"
+      )
+    },
+    error = function(err){
+      model_gam<-withTimeout(
+        bam(y_all ~ crossbasis+ s(ID_gam, bs="re")+offset(log(offset)),family=poisson(),
+            paraPen=list(crossbasis=cbPen), method = "REML"),
+        timeout = 30*60,
+        onTimeout = "silent"
+      )
+    }
+  )
+  
+  if(is.null(model_gam)){
+    next
+  }
+  
+  time_gam[i] <- (proc.time()-mtime)[3]
+  
   
 
   # Laplace
@@ -229,19 +279,23 @@ for (i in 1:nsim){
   model_laplace <- DLNM_Laplace(y_all ~ 1, 
                                 crossbasis = crossbasis, 
                                 ID = as.factor(datafull$ID),
-                                covar.ri = "Leroux", 
+                                covar.ri = "Leroux", offset = offset,
                                 vx = vx, vl = vl)
   time_Laplace[i] <- (proc.time()-mtime)[3]
  
+  spatial_effect[i] <- exp(model_laplace$v_mode[5])/(1+exp(model_laplace$v_mode[5]))
+  spatial_var[i] <- 1/exp(model_laplace$v_mode[4])
   
   ####################################
   ################### Prediction #####
+  
+  # Predict DLNM
   pred_laplace <- predRR(model = model_laplace,
                          at_x = at_x,
                          cen = cen,
                          L = L)
   
-  # STORE THE RESULTS
+  # STORE THE RESULTS 
   bias_Laplace <- bias_Laplace + (matrix(pred_laplace$logpredX, ncol=L+1)-trueeff[[ind]])
   cov_Laplace <- cov_Laplace + (as.numeric(trueeff[[ind]]) >= pred_laplace$Qlower_logpredX &
                                   as.numeric(trueeff[[ind]]) <= pred_laplace$Qupper_logpredX)
@@ -263,28 +317,41 @@ for (i in 1:nsim){
     Laplace_lag[,i] <- pred_atxvar
   }
   
+  # Predict outcome
+  Z.rand <- Matrix::sparse.model.matrix(~ as.factor(datafull$ID) + 0)[!is.na(crossbasis[,1]),] 
+  Xpred <- Matrix::Matrix(as.matrix(cbind(1,crossbasis[!is.na(crossbasis[,1]),],Z.rand)))
+
+  mu_pred <-exp(as.numeric(Xpred%*%model_laplace$xi_mode))
+  mu_true <- mu[!is.na(crossbasis[,1])]
+  
+  sd_mu <-  sqrt(pmax(0,Matrix::rowSums((Xpred%*%model_laplace$Sigma)*Xpred)))
+  quantiles_mu <- mapply(function(mean_val, sd_val) {
+    qnorm(p = c(0.025, 0.975), mean = mean_val, sd = sd_val)
+  }, log(mu_pred), sd_mu)
+  Qlower_mu = exp(quantiles_mu[1,])
+  Qupper_mu = exp(quantiles_mu[2,])
+  
+  cov_mu_Laplace = cov_mu_Laplace + (mu_true >= Qlower_mu & mu_true <= Qupper_mu)
+  rmse_mu_Laplace = rmse_mu_Laplace + (mu_true - mu_pred)^2
+  
+  
+  # Predict random effects
+  ind_re <- (length(model_laplace$xi_mode)-length(unique(datafull$ID))+1) :(length(model_laplace$xi_mode))
+  re <- as.numeric(Z.rand %*% model_laplace$xi_mode[ind_re])
+  re_true <- random_area[!is.na(crossbasis[,1])]
+  
+  sd_re <- sqrt(pmax(0,Matrix::rowSums((Z.rand%*%model_laplace$Sigma[ind_re,ind_re])*Z.rand)))
+  
+  quantiles_re <- mapply(function(mean_val, sd_val) {
+    qnorm(p = c(0.025, 0.975), mean = mean_val, sd = sd_val)
+  }, re, sd_re)
+  Qlower_re = quantiles_re[1,]
+  Qupper_re = quantiles_re[2,]
+  
+  cov_re_Laplace <- cov_re_Laplace + (unique(re_true) >= unique(Qlower_re) & unique(re_true) <= unique(Qupper_re))
+  rmse_re_Laplace <- rmse_re_Laplace + (unique(re_true) - unique(re))^2
   
   # Bam
-  
-  Slag2 <-  diag((0:(vl-1))^2)
-  cbPen <- cbPen(crossbasis,addSlag=list(Slag2)) 
-
-  ID_gam = as.factor(datafull$ID)
-  
-  mtime <- proc.time()
-  gam_try = tryCatch(
-    {
-      model_gam<-bam(y_all ~ crossbasis+ s(ID_gam, bs="re"),family=poisson(),
-                     paraPen=list(crossbasis=cbPen))
-    },
-    error = function(err){
-      model_gam<-bam(y_all ~ crossbasis+ s(ID_gam, bs="re"),family=poisson(),
-                     paraPen=list(crossbasis=cbPen), method = "REML")
-    }
-  )
-  
-  time_gam[i] <- (proc.time()-mtime)[3]
-  
   pred_gam <- crosspred(basis = crossbasis, model=model_gam, at = seq(0,10,0.25),
                         cen = cen, lag=L, bylag=1)
   # STORE THE RESULTS
@@ -308,26 +375,67 @@ for (i in 1:nsim){
   }
    
   
+  # Predict outcome
+  mu_pred <-exp(as.numeric(Xpred%*%coef(model_gam)))
+
+  sd_mu <-  sqrt(pmax(0,Matrix::rowSums((Xpred%*%vcov(model_gam))*Xpred)))
+  quantiles_mu <- mapply(function(mean_val, sd_val) {
+    qnorm(p = c(0.025, 0.975), mean = mean_val, sd = sd_val)
+  }, log(mu_pred), sd_mu)
+  Qlower_mu = exp(quantiles_mu[1,])
+  Qupper_mu = exp(quantiles_mu[2,])
+  
+  cov_mu_gam = cov_mu_gam + (mu_true >= Qlower_mu & mu_true <= Qupper_mu)
+  rmse_mu_gam = rmse_mu_gam + (mu_true - mu_pred)^2
+  
+  
+  # Predict random effects
+  ind_re <- grepl( "ID", names(coef(model_gam)))
+  re <- as.numeric(Z.rand %*% coef(model_gam)[ind_re])
+  sd_re <- sqrt(pmax(0,Matrix::rowSums((Z.rand%*%vcov(model_gam)[ind_re,ind_re])*Z.rand)))
+  
+  quantiles_re <- mapply(function(mean_val, sd_val) {
+    qnorm(p = c(0.025, 0.975), mean = mean_val, sd = sd_val)
+  }, re, sd_re)
+  Qlower_re = quantiles_re[1,]
+  Qupper_re = quantiles_re[2,]
+  
+  cov_re_gam <- cov_re_gam + (unique(re_true) >= unique(Qlower_re) & unique(re_true) <= unique(Qupper_re))
+  rmse_re_gam <- rmse_re_gam + (unique(re_true) - unique(re))^2
+  
+  
+  
+  
   
 }
 
-cor(na.omit(log(y_all+1)),log(predict(model_gam,type="response")+1))
+
+.#cor(na.omit(log(y_all+1)),log(predict(model_gam,type="response")+1))
 
 
-results = data.frame(Metric = c("Bias", "Coverage", "Coverage all", "RMSE", "RMSE all", "Time"),
+results = data.frame(Metric = c("Bias", "Coverage", "Coverage all", "RMSE", "RMSE all",
+                                "Coverage mu", "RMSE mu", "Coverage re", "RMSE re", "Time"),
                      Laplace = c(mean(bias_Laplace[seq(0,10,0.25)!=cen,]/nsim),
                                  mean((cov_Laplace[seq(0,10,0.25)!=cen,]/nsim)),
                                  mean((cov_all_Laplace[seq(0,10,0.25)!=cen]/nsim)),
                                  mean(sqrt(rmse_Laplace[seq(0,10,0.25)!=cen,]/nsim)),
                                  mean(sqrt(rmse_all_Laplace[seq(0,10,0.25)!=cen]/nsim)),
+                                 mean(cov_mu_Laplace/nsim), mean(sqrt(rmse_mu_Laplace/nsim)),
+                                 mean(cov_re_Laplace/nsim), mean(sqrt(rmse_re_Laplace/nsim)),
                                  mean(time_Laplace)),
                      gam = c(mean(bias_gam[seq(0,10,0.25)!=cen,]/nsim),
                              mean((cov_gam[seq(0,10,0.25)!=cen,]/nsim)),
                              mean((cov_all_gam[seq(0,10,0.25)!=cen]/nsim)),
                              mean(sqrt(rmse_gam[seq(0,10,0.25)!=cen,]/nsim)),
                              mean(sqrt(rmse_all_gam[seq(0,10,0.25)!=cen]/nsim)),
+                             mean(cov_mu_gam/nsim), mean(sqrt(rmse_mu_gam/nsim)),
+                             mean(cov_re_gam/nsim), mean(sqrt(rmse_re_gam/nsim)),
                              mean(time_gam)))
 print(results)
+
+summary(spatial_effect)
+summary(spatial_var)
+
 
 #########################################
 ########################################
@@ -355,7 +463,7 @@ grid <- data.frame(x=rep(seq(0,10,0.25), each=41),lag=rep(0:40,41)) %>% mutate(r
 trueeff <- matrix(grid$result, ncol=41, byrow=T)
 
 
-plot(seq(0,10,0.25),Laplace_x[,1],col=grey(0.8), type="l", ylim=c(-0.01,0.3),
+plot(seq(0,10,0.25),Laplace_x[,1],col=grey(0.8), type="l", ylim=c(-0.03,0.5),
      xlab="var", ylab="log RR", main="Laplace overall risk")
 for (m in 2:(nsample)){
   lines(seq(0,10,0.25),Laplace_x[,m],col=grey(0.8))
@@ -363,7 +471,7 @@ for (m in 2:(nsample)){
 lines(seq(0,10,0.25), apply(trueeff,1,sum), col="red", lty=2)
 lines(seq(0,10,0.25), pred_Laplace.meanx/nsim)
 
-plot(seq(0,10,0.25),gam_x[,1],col=grey(0.8), type="l", ylim=c(-0.01,0.3),
+plot(seq(0,10,0.25),gam_x[,1],col=grey(0.8), type="l", ylim=c(-0.03,0.5),
      xlab="var", ylab="log RR", main="Gam overall risk")
 for (m in 2:(nsample)){
   lines(seq(0,10,0.25),gam_x[,m],col=grey(0.8))

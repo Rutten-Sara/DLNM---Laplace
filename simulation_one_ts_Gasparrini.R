@@ -60,7 +60,7 @@ cumeff <- apply(Q,1,fcumeff,0:40,combsim[ind])
 
 
 # NUMBER OF ITERATIONS 
-nsim <- 1000
+nsim <- 500
 nsample <- 25
 # BASELINE
 base <- c(15,150,15)
@@ -81,6 +81,7 @@ rmse_Laplace <- matrix(0,ncol=dim(trueeff[[ind]])[2], nrow=dim(trueeff[[ind]])[1
 cov_all_Laplace <- rep(0,dim(trueeff$Temperature)[1])
 rmse_all_Laplace <- rep(0,dim(trueeff$Temperature)[1])
 time_Laplace <- NULL
+cov_mu_Laplace <- rmse_mu_Laplace <- numeric(sum(!is.na(cumeff)))
 
 bias_gam <- matrix(0,ncol=dim(trueeff[[ind]])[2], nrow=dim(trueeff[[ind]])[1])
 cov_gam <- matrix(0,ncol=dim(trueeff[[ind]])[2], nrow=dim(trueeff[[ind]])[1])
@@ -88,6 +89,8 @@ rmse_gam <- matrix(0,ncol=dim(trueeff[[ind]])[2], nrow=dim(trueeff[[ind]])[1])
 cov_all_gam <- rep(0,dim(trueeff$Temperature)[1])
 rmse_all_gam <- rep(0,dim(trueeff$Temperature)[1])
 time_gam <- NULL
+cov_mu_gam <- rmse_mu_gam <- numeric(sum(!is.na(cumeff)))
+
 
 # Plots
 pred_Laplace.meanx <- pred_gam.meanx <- rep(0,length(seq(0,10,0.25) ))
@@ -148,6 +151,25 @@ for (i in 1:nsim){
     Laplace_lag[,i] <- pred_atxvar
   }
   
+  # Predict outcome
+  Xpred <- Matrix::Matrix(as.matrix(cbind(1,crossbasis[!is.na(crossbasis[,1]),])))
+  
+  mu_pred <-exp(as.numeric(Xpred%*%model_laplace$xi_mode))
+  mu_true <- mu[!is.na(crossbasis[,1])]
+  
+  sd_mu <-  sqrt(pmax(0,Matrix::rowSums((Xpred%*%model_laplace$Sigma)*Xpred)))
+  quantiles_mu <- mapply(function(mean_val, sd_val) {
+    qnorm(p = c(0.025, 0.975), mean = mean_val, sd = sd_val)
+  }, log(mu_pred), sd_mu)
+  Qlower_mu = exp(quantiles_mu[1,])
+  Qupper_mu = exp(quantiles_mu[2,])
+  
+  cov_mu_Laplace = cov_mu_Laplace + (mu_true >= Qlower_mu & mu_true <= Qupper_mu)
+  rmse_mu_Laplace = rmse_mu_Laplace + (mu_true - mu_pred)^2
+  
+  
+  
+  
   # DEFINE THE PENALTY MATRICES
   # VARYING RIDGE PENALTY APPLIED TO COEFFICIENTS (Eq. 7a)
   Slag2 <-  diag((0:(vl-1))^2)
@@ -192,22 +214,39 @@ for (i in 1:nsim){
     gam_lag[,i] <- pred_atxvar
   }
   
+  # Predict outcome
+  mu_pred <-exp(as.numeric(Xpred%*%coef(model_gam)))
+  
+  sd_mu <-  sqrt(pmax(0,Matrix::rowSums((Xpred%*%vcov(model_gam))*Xpred)))
+  quantiles_mu <- mapply(function(mean_val, sd_val) {
+    qnorm(p = c(0.025, 0.975), mean = mean_val, sd = sd_val)
+  }, log(mu_pred), sd_mu)
+  Qlower_mu = exp(quantiles_mu[1,])
+  Qupper_mu = exp(quantiles_mu[2,])
+  
+  cov_mu_gam = cov_mu_gam + (mu_true >= Qlower_mu & mu_true <= Qupper_mu)
+  rmse_mu_gam = rmse_mu_gam + (mu_true - mu_pred)^2
+  
+  
 }
 
 cor(log(y_all+1)[!is.na(crossbasis[,1])],log(predict(model_gam,type="response")+1))
 
-results = data.frame(Metric = c("Bias", "Coverage", "Coverage all", "RMSE", "RMSE all", "Time"),
+results = data.frame(Metric = c("Bias", "Coverage", "Coverage all", "RMSE", "RMSE all",
+                                "Coverage mu", "RMSE mu", "Time"),
                      Laplace = c(mean(bias_Laplace[seq(0,10,0.25)!=cen,]/nsim),
                                  mean((cov_Laplace[seq(0,10,0.25)!=cen,]/nsim)),
                                  mean((cov_all_Laplace[seq(0,10,0.25)!=cen]/nsim)),
                                  mean(sqrt(rmse_Laplace[seq(0,10,0.25)!=cen,]/nsim)),
                                  mean(sqrt(rmse_all_Laplace[seq(0,10,0.25)!=cen]/nsim)),
+                                 mean(cov_mu_Laplace/nsim), mean(sqrt(rmse_mu_Laplace/nsim)),
                                  mean(time_Laplace)),
                      gam = c(mean(bias_gam[seq(0,10,0.25)!=cen,]/nsim),
                              mean((cov_gam[seq(0,10,0.25)!=cen,]/nsim)),
                              mean((cov_all_gam[seq(0,10,0.25)!=cen]/nsim)),
                              mean(sqrt(rmse_gam[seq(0,10,0.25)!=cen,]/nsim)),
                              mean(sqrt(rmse_all_gam[seq(0,10,0.25)!=cen]/nsim)),
+                             mean(cov_mu_gam/nsim), mean(sqrt(rmse_mu_gam/nsim)),
                              mean(time_gam)))
 
 
