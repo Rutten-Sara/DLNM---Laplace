@@ -144,7 +144,7 @@ DLNM_Laplace <- function(model,
                                      Matrix::Matrix(exp(v[5])/(1+exp(v[5]))*Rn, sparse = T))
       logpv.rand <- function(v)  {
         value <- 0.5 * nu * v[4] - (0.5*nu + a)*log(b + 0.5*nu*exp(v[4])) + 
-          0.5*sum(sapply(eigen(Lv(v),only.values = T)$values,log)) + 
+          0.5*sum(sapply(eigen(Gv(v),only.values = T)$values,log)) + 
           a.rho*v[5] - (a.rho + b.rho)*log(1 + exp(v[5]))
         return(as.numeric(value))}
       v.rand <- c(1,1)
