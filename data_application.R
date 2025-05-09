@@ -106,38 +106,51 @@ library(tmap)
 
 map_2006 = tm_shape(map) +
   tm_polygons("death_2006", palette = "YlOrRd", title="2006", breaks = c(0,10,20,30,40,50)) +
-  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom")
+  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom",
+            legend.frame = F, legend.na.show = F)
 map_2013 = tm_shape(map) +
   tm_polygons("death_2013", palette = "YlOrRd", title="2013", breaks = c(0,10,20,30,40,50)) +
-  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom")
+  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom",
+            legend.frame = F, legend.na.show = F)
+
 tmap_arrange(map_2006, map_2013, ncol=2)
 
 
 map_inc_2006 = tm_shape(map) +
   tm_polygons("inc_2006", palette = "YlOrRd", title="2006", breaks = c(0,1,2,3,4,5,6)) +
-  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom")
+  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom",
+            legend.frame = F, legend.na.show = F)
 map_inc_2013 = tm_shape(map) +
   tm_polygons("inc_2013", palette = "YlOrRd", title="2013", breaks = c(0,1,2,3,4,5,6)) +
-  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom")
+  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom",
+            legend.frame = F, legend.na.show = F)
 tmap_arrange(map_2013, map_inc_2013, ncol=2)
+
+pdf("map_deaths.pdf",height=5,width=8)
 tmap_arrange(map_inc_2006, map_inc_2013, ncol=2)
+dev.off()
+
 
 map_temp_2006 = tm_shape(map) +
   tm_polygons("temp_2006", palette = "YlOrRd", title="2006", breaks = c(16,17,18,19,20), style="cont") +
-  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom")
+  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom",
+            legend.frame = F, legend.na.show = F)
 map_temp_2013 = tm_shape(map) +
   tm_polygons("temp_2013", palette = "YlOrRd", title="2013", breaks = c(16,17,18,19,20), style="cont") +
-  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom")
-tmap_arrange(map_temp_2006, map_temp_2013, ncol=2)
+  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom",
+            legend.frame = F, legend.na.show = F)
 
+pdf("map_temp.pdf",height=5,width=8)
+tmap_arrange(map_temp_2006, map_temp_2013, ncol=2)
+dev.off()
 
 ################################################################################
 #Prepare crossbasis matrix 
 
 library(dlnm)
 L <- 7 # maximum lag
-vx <- 9 # number of basis for exposure var
-vl <- 10 # number of basis for lag var
+vx <- 14 # number of basis for exposure var
+vl <- 15 # number of basis for lag var
 group <- factor(paste(datafull$MSOA11CD, datafull$year, sep="-"))
 crossbasis <- crossbasis(datafull$tmean, lag=L, 
                          argvar=list(fun="ps",df = vx, intercept=F),
@@ -164,7 +177,10 @@ model_laplace <- DLNM_Laplace(y_all ~ spldoy:factor(year) + factor(dow),
                                                # scale offset by factor 1/1000 to avoid numerical issues
 tictoc::toc()
 
-#save(model_laplace, file = "Models/model_Leroux_offset.RData")
+exp(model_laplace$v_mode[5])/(1+exp(model_laplace$v_mode[5]))
+
+
+#save(model_laplace, file = "model_Laplace_degree15.RData")
 library(mgcv)
 
 # BAM
@@ -181,20 +197,25 @@ model_gam = bam(y_all ~ crossbasis + s(ID, bs="re") + spldoy:factor(year) + fact
 time_gam <- (proc.time()-mtimegam)[3]
 
 #save(model_gam, file = "Models/model_gam_offset.RData")
-#load("Models/model_gam.RData")
+#load("Models/model_gam_offset.RData")
 
 ####################################
+################### Prediction #####
+
 ################### Prediction #####
 at_x = seq(9,27, by=0.5)
 cen = 14
 pred_laplace<- predRR(model = model_laplace,
-                       at_x = at_x,
-                       cen = cen, L = L)
+                      at_x = at_x,
+                      cen = cen, L = L)
 pred_gam <- crosspred(crossbasis, model_gam, 
                       at = at_x , cen=14)
 
 # PLOT
 library(ggplot2)
+
+pdf("Leroux.pdf",height=4,width=6)
+
 col <- c("darkgoldenrod3", "aquamarine3")
 parold <- par(no.readonly=T)
 par(mar=c(4,4,1,0.5), las=1, mgp=c(2.5,1,0))
@@ -220,11 +241,13 @@ do.call("lines",plot.arg)
 
 legend("top", c("Bam", "Laplace"), lty=1, lwd=1.5, col=col, bty="n",
        inset=0.05, y.intersp=2, cex=0.8)
+#title("10 degrees of freedom")
 par(parold)
-
+dev.off()
 
 # Lag specific plot
 
+pdf("lag_24.pdf",height=4,width=6)
 lag_pred_Laplace= matrix(exp(pred_laplace$logpredX), ncol = L+1)
 lag_pred_Laplace_lower= matrix(exp(pred_laplace$Qlower_logpredX), ncol = L+1)
 lag_pred_Laplace_higher= matrix(exp(pred_laplace$Qupper_logpredX), ncol = L+1)
@@ -248,7 +271,7 @@ do.call("lines",plot.arg)
 legend("top", c("Bam", "Laplace"), lty=1, lwd=1.5, col=col, bty="n",
        inset=0.05, y.intersp=2, cex=0.8)
 par(parold)
-
+dev.off()
 
 col <- c("darkgoldenrod3", "aquamarine3")
 parold <- par(no.readonly=T)
@@ -287,20 +310,24 @@ library(tmap)
 map1 <- tm_shape(map) +
   tm_polygons("laplacespat", palette = "YlOrRd", title="Random intercept (Laplace)",midpoint = 0,
               breaks = c(-2,-1.5,-1,-0.5,0,0.5,1,1.5,2)) +
-  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom")
+  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom",
+            legend.frame = F, legend.na.show = F)
 
 # Second map
 map2 <- tm_shape(map) +
   tm_polygons("bamspat", palette = "YlOrRd", title="Random intercept (bam())",midpoint=0,
               breaks = c(-2,-1.5,-1,-0.5,0,0.5,1,1.5,2)) +
-  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom")
+  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom",
+            legend.frame = F, legend.na.show = F)
 
 # Arrange maps in a grid
+pdf("Leroux_reffect.pdf",height=5,width=8)
 tmap_arrange(map1, map2, ncol = 2)
-
+dev.off()
 
 
 # Exceedance probability
+
 at_x_exceedance = seq(9,27, by=0.01)
 pred_laplace_exceedance<- predRR(model = model_laplace,
                       at_x = at_x_exceedance,
@@ -316,9 +343,10 @@ exceedance_1 <- mapply(function(mean_val, sd_val) {
   pnorm(q = 0, mean = mean_val, sd = sd_val, lower.tail = F)
 }, log(pred_all), sd_all)
 
+pdf("exceedance_probability.pdf",height=4,width=6)
 plot(at_x_exceedance, exceedance_1, type = "l", col = "blue", xlab = expression(paste("Temperature ("*degree,"C)")),
      ylab = "P(RR>1)")
-
+dev.off()
 #map$ex = exceedance_1
 #tm_shape(map) +
 #  tm_polygons("ex", palette = "YlOrRd", title="Exceedance probability")+
@@ -359,7 +387,8 @@ map_exceedance_2006$prob = ex_prob_2006
 ex_2006 <- tm_shape(map_exceedance_2006) +
   tm_polygons("prob", palette = "Blues", title="P(af>0) in 2006",
               breaks = c(-Inf,0.9,0.95,1)) +
-  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom")
+  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom",
+            legend.frame = F, legend.na.show = F)
 
 
 
@@ -383,11 +412,12 @@ map_exceedance_2013$prob = ex_prob_2013
 ex_2013 <- tm_shape(map_exceedance_2013) +
   tm_polygons("prob", palette = "Blues", title="P(af>0) in 2013",
               breaks = c(-Inf,0.9,0.95,1)) +
-  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom")
+  tm_layout(legend.outside = TRUE, legend.outside.position = "bottom",
+            legend.frame = F, legend.na.show = F)
 
-
+pdf("exceedance_prob_af.pdf",height=5,width=8)
 tmap_arrange(ex_2006, ex_2013, ncol = 2)
-
+dev.off()
 
 
 
@@ -421,9 +451,10 @@ data_cor = data.frame(Leroux = as.matrix(exp(pred_laplace_Leroux$logpredX)), Con
                       ICAR = as.matrix(exp(pred_laplace_ICAR$logpredX)), Independent = as.matrix(exp(pred_laplace_ind$logpredX)))
 
 library(GGally)
+pdf("correlation_Laplace.pdf",height=6,width=8)
 ggpairs(data_cor,columns = 1:4, 
         title = "Correlation between different Laplace models", 
        axisLabels = "show") 
-
+dev.off()
 
 
