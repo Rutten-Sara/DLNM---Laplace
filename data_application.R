@@ -421,40 +421,4 @@ dev.off()
 
 
 
-################### Correlations between different models
-
-load("Models/model_Leroux_offset.RData")
-pred_laplace_Leroux<- predRR(model = model_laplace,
-                      at_x = at_x,
-                      cen = cen, L = L)
-
-
-load("Models/model_BYM_offset.RData")
-pred_laplace_BYM<- predRR(model = model_laplace,
-                             at_x = at_x,
-                             cen = cen, L = L)
-
-
-load("Models/model_ICAR_offset.RData")
-pred_laplace_ICAR<- predRR(model = model_laplace,
-                             at_x = at_x,
-                             cen = cen, L = L)
-
-
-load("Models/model_ind_offset.RData")
-pred_laplace_ind<- predRR(model = model_laplace,
-                             at_x = at_x,
-                             cen = cen, L = L)
-
-
-data_cor = data.frame(Leroux = as.matrix(exp(pred_laplace_Leroux$logpredX)), Convolution = as.matrix(exp(pred_laplace_BYM$logpredX)),
-                      ICAR = as.matrix(exp(pred_laplace_ICAR$logpredX)), Independent = as.matrix(exp(pred_laplace_ind$logpredX)))
-
-library(GGally)
-pdf("correlation_Laplace.pdf",height=6,width=8)
-ggpairs(data_cor,columns = 1:4, 
-        title = "Correlation between different Laplace models", 
-       axisLabels = "show") 
-dev.off()
-
 
