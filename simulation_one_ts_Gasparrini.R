@@ -58,6 +58,59 @@ fcumeff <- function(hist,lag,fun) sum(do.call(fun,list(hist,lag)))
 ind = 1
 cumeff <- apply(Q,1,fcumeff,0:40,combsim[ind])
 
+# Plotting the surfaces
+library(plot3D)
+
+pdf("scenarios.pdf",height=4,width=12)
+
+layout(matrix(1:3,ncol=3,byrow=TRUE))
+par(mar=c(1,1,3,1))
+
+# scenario 1
+df = data.frame(x = rep(seq(0,10,0.25)), y = rep(0:40, each = 41))
+
+dens <- akima::interp(x = df$x, 
+                      y = df$y, 
+                      z = trueeff[[1]], 
+                      duplicate = "mean", linear=FALSE,
+                      xo=seq(min(df$x), max(df$x), length = 200),
+                      yo=seq(min(df$y), max(df$y), length = 200))
+persp3D(x=dens$x, y=dens$y, z=dens$z,ticktype="detailed",theta=230,
+        ltheta=200,phi=30,lphi=30,xlab="exposure",ylab="lag",zlab="log-RR", zlim=c(-0.005,0.02),
+        nticks = 4,cex.main = 2,
+        shade = 0.75,r=sqrt(3),d=5,cex.axis=1.2, cex.lab=2,border=NA,
+        col="steelblue", main = "Plane")
+
+# scenario 2
+dens <- akima::interp(x = df$x, 
+                      y = df$y, 
+                      z = trueeff[[2]], 
+                      duplicate = "mean", linear= T,
+                      xo=seq(min(df$x), max(df$x), length = 200),
+                      yo=seq(min(df$y), max(df$y), length = 200))
+persp3D(x=dens$x, y=dens$y, z=dens$z,ticktype="detailed",theta=230,
+        ltheta=200,phi=30,lphi=30,xlab="exposure",ylab="lag",zlab="log-RR", zlim=c(-0.005,0.10),
+        nticks = 4,cex.main = 2,
+        shade = 0.75,r=sqrt(3),d=5,cex.axis=1.2, cex.lab=2,border=NA,
+        col="steelblue", main = "Temp")
+
+
+# scenario 3
+
+dens <- akima::interp(x = df$x, 
+                      y = df$y, 
+                      z = trueeff[[3]], 
+                      duplicate = "mean", linear=FALSE,
+                      xo=seq(min(df$x), max(df$x), length = 200),
+                      yo=seq(min(df$y), max(df$y), length = 200))
+persp3D(x=dens$x, y=dens$y, z=dens$z, ticktype="detailed",theta=230,
+        ltheta=200,phi=30,lphi=30,xlab="exposure",ylab="lag",zlab="log-RR", zlim=c(-0.001,0.025),
+        nticks = 4,cex.main = 2,
+        shade = 0.75,r=sqrt(3),d=5,cex.axis=1.2, cex.lab=2,border=NA,
+        col="steelblue", main = "Complex")
+
+
+dev.off()
 
 # NUMBER OF ITERATIONS 
 nsim <- 500
