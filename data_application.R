@@ -80,6 +80,26 @@ datafull = merge(datafull, dens_London, by = "MSOA11CD")
 
 # Plots
 
+# Calculate mean for each day
+mean_data <- datafull %>%
+  filter(year == 2006)%>%
+  group_by(date) %>%
+  summarize(mean_value= mean(tmean))
+
+# Plot
+datafull %>%
+  filter(year == 2006) %>%
+  filter(MSOA11CD %in% unique(datafull$MSOA11CD))%>%
+  ggplot(aes(x = date, y = tmean)) +
+  geom_line(aes(group = MSOA11CD), alpha = 0.1, color = "blue") +  # All series with transparency
+  geom_line(data = mean_data, aes(x = date, y = mean_value), 
+            color = "red", size = 1.2) +   # Mean series
+  theme_minimal() +
+  labs(title = "Daily mean temperature 2006",
+       x = "Date", y = "Temperature (Celsius)")
+
+
+
 map_death = datafull %>% group_by(MSOA11CD, year)  %>%
   summarize(tot_cases = sum(dtot), tot_pop = mean(pop)) %>%
   mutate(tot_inc = tot_cases/tot_pop*1000)%>%
@@ -149,8 +169,8 @@ dev.off()
 
 library(dlnm)
 L <- 7 # maximum lag
-vx <- 14 # number of basis for exposure var
-vl <- 15 # number of basis for lag var
+vx <- 9 # number of basis for exposure var
+vl <- 10 # number of basis for lag var
 group <- factor(paste(datafull$MSOA11CD, datafull$year, sep="-"))
 crossbasis <- crossbasis(datafull$tmean, lag=L, 
                          argvar=list(fun="ps",df = vx, intercept=F),
@@ -188,10 +208,13 @@ library(mgcv)
 # DEFINE THE PENALTY MATRICES
 Slag2 <-  diag((0:(vl-1))^2)
 
+nb <- poly2nb(map, row.names = map$MSOA11CD)
+names(nb) <- attr(nb, "region.id")
+
 cbPen <- cbPen(crossbasis,addSlag=list(Slag2))
 
 mtimegam <- proc.time()
-model_gam = bam(y_all ~ crossbasis + s(ID, bs="re") + spldoy:factor(year) + factor(dow) + offset(log(pop)),
+model_gam = bam(y_all ~ crossbasis + s(ID, bs="mrf", xt = list(nb = nb)) + spldoy:factor(year) + factor(dow) + offset(log(pop)),
                 data=datafull, family="poisson",
                 paraPen=list(crossbasis=cbPen))
 time_gam <- (proc.time()-mtimegam)[3]
@@ -296,7 +319,12 @@ par(parold)
 
 ################################################
 library("gratia")
-gamspat <- smooth_coefs(model_gam, "s(ID)")
+
+all_pred =  predict(model_gam, type = "lpmatrix")
+ind_re <- grepl( "ID", names(coef(model_gam)))
+pred_re = as.matrix(data.frame(all_pred[,ind_re]) %>% distinct())
+gamspat <- as.numeric(scale(as.numeric(pred_re %*% coef(model_gam)[ind_re]), scale = F))
+
 xispat <- model_laplace$xispat
 
 plot(gamspat,xispat)
@@ -420,5 +448,41 @@ tmap_arrange(ex_2006, ex_2013, ncol = 2)
 dev.off()
 
 
+
+################### Correlations between different models
+
+load("Models/model_Leroux_offset.RData")
+pred_laplace_Leroux<- predRR(model = model_laplace,
+                      at_x = at_x,
+                      cen = cen, L = L)
+
+
+load("Models/model_BYM_offset.RData")
+pred_laplace_BYM<- predRR(model = model_laplace,
+                             at_x = at_x,
+                             cen = cen, L = L)
+
+
+load("Models/model_ICAR_offset.RData")
+pred_laplace_ICAR<- predRR(model = model_laplace,
+                             at_x = at_x,
+                             cen = cen, L = L)
+
+
+load("Models/model_ind_offset.RData")
+pred_laplace_ind<- predRR(model = model_laplace,
+                             at_x = at_x,
+                             cen = cen, L = L)
+
+
+data_cor = data.frame(Leroux = as.matrix(exp(pred_laplace_Leroux$logpredX)), Convolution = as.matrix(exp(pred_laplace_BYM$logpredX)),
+                      ICAR = as.matrix(exp(pred_laplace_ICAR$logpredX)), Independent = as.matrix(exp(pred_laplace_ind$logpredX)))
+
+library(GGally)
+pdf("correlation_Laplace.pdf",height=6,width=8)
+ggpairs(data_cor,columns = 1:4, 
+        title = "Correlation between different Laplace models", 
+       axisLabels = "show") 
+dev.off()
 
 
