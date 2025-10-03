@@ -1,7 +1,7 @@
 rm(list = ls())
 library(splines); library(dlnm); library(tsModel); library(biglm);  library(MASS); library(tidyverse); library(plot3D)
-library(mgcv); library(nlraa)
-library(Matrix); library(R.utils)
+library(mgcv); library(nlraa); library(INLA)
+library(Matrix); library(R.utils); library(spdep)
 library(data.table)
 
 ################################################################################
@@ -124,8 +124,8 @@ ind = 3
 cumeff <- apply(Q,1,fcumeff,0:40,combsim[ind])
 
 # NUMBER OF ITERATIONS 
-nsim <- 50
-nsample <- 50
+nsim <- 500
+nsample <- 25
 
 # BASELINE
 #base <- c(90,270,130)
@@ -158,18 +158,27 @@ rmse_gam <- matrix(0,ncol=dim(trueeff$Temperature)[2], nrow=dim(trueeff$Temperat
 rmse_all_gam <- rep(0,dim(trueeff$Temperature)[1])
 time_gam <- NULL
 
+bias_INLA <- matrix(0,ncol=dim(trueeff[[ind]])[2], nrow=dim(trueeff[[ind]])[1])
+cov_INLA <- matrix(0,ncol=dim(trueeff[[ind]])[2], nrow=dim(trueeff[[ind]])[1])
+rmse_INLA <- matrix(0,ncol=dim(trueeff[[ind]])[2], nrow=dim(trueeff[[ind]])[1])
+cov_all_INLA <- rep(0,dim(trueeff$Temperature)[1])
+rmse_all_INLA <- rep(0,dim(trueeff$Temperature)[1])
+time_INLA <- NULL
+
 
 cov_re_Laplace <- rmse_re_Laplace <- numeric(length(unique(datafull$ID)))
 cov_mu_Laplace <- rmse_mu_Laplace <- numeric(sum(!is.na(cumeff)))
 cov_re_gam <- rmse_re_gam <- numeric(length(unique(datafull$ID)))
 cov_mu_gam <- rmse_mu_gam <- numeric(sum(!is.na(cumeff)))
-
+cov_mu_INLA <- rmse_mu_INLA <- numeric(sum(!is.na(cumeff)))
+cov_re_INLA <- rmse_re_INLA <- numeric(length(unique(datafull$ID)))
 
 # Plots
-pred_Laplace.meanx <- pred_gam.meanx <- rep(0,length(seq(0,10,0.25) ))
-pred_Laplace.meanlag <- pred_gam.meanlag <- rep(0,L+1)
-Laplace_x <- gam_x <- matrix(0,ncol=nsample, nrow=length(seq(0,10,0.25) ))
-Laplace_lag <- gam_lag <- matrix(0,ncol=nsample, nrow=L+1)
+pred_Laplace.meanx <- pred_gam.meanx <- pred_INLA.meanx <- rep(0,length(seq(0,10,0.25) ))
+pred_Laplace.meanlag <- pred_gam.meanlag <- pred_INLA.meanlag <- rep(0,L+1)
+Laplace_x <- gam_x <- INLA_x <- matrix(0,ncol=nsample, nrow=length(seq(0,10,0.25) ))
+Laplace_lag <- gam_lag <- INLA_lag <- matrix(0,ncol=nsample, nrow=L+1)
+
 
 spatial_effect <- numeric(nsim)
 spatial_var <- numeric(nsim)
@@ -207,6 +216,15 @@ X <- matrix(rnorm(S*nsim),nsim)
 spat_sim <- eigen$vectors %*% diag(sqrt(eigen$values),S) %*% t(X)
 
 offset_true = ceiling(rgamma(length(unique(datafull$MSOA11CD)),1,0.05))
+
+adj.file <- "output/adjacency.mat"
+adj_INLA <- nb2INLA(adj.file, neig.map)
+
+
+# Knots INLA
+knots_vx <- quantile(x, probs = c(0.5,0.9))
+knots_vl <- logknots(0:L, nk = 2)
+
 
 map$re = spat_sim[,1]
 plot(map[,"re"])
@@ -403,13 +421,86 @@ for (i in 1:nsim){
   rmse_re_gam <- rmse_re_gam + (unique(re_true) - unique(re))^2
   
   
+  # Results INLA (unpenalized)
+  crossbasis_unpen <- crossbasis(x, argvar=list(knots=knots_vx, fun="bs", intercept=F),
+                                 arglag=list(knots=knots_vl, fun="bs",intercept=T), lag=L, group=group)
+  y_all[which(is.na(crossbasis_unpen[, 1]))] <- NA
+  ID_Laplace = as.numeric(ID_gam[!is.na(crossbasis_unpen[, 1])])
+  offset_INLA = offset[!is.na(crossbasis_unpen[, 1])]
+  
+  crossbasis_unpen_clean <- na.omit(crossbasis_unpen)
+  class(crossbasis_unpen_clean) <- class(crossbasis_unpen)
+  attr(crossbasis_unpen_clean, "argvar") <- attr(crossbasis_unpen, "argvar")
+  attr(crossbasis_unpen_clean, "arglag") <- attr(crossbasis_unpen, "arglag")
+  attr(crossbasis_unpen_clean, "basisvar") <- attr(crossbasis_unpen, "basisvar")
+  attr(crossbasis_unpen_clean, "basislag") <- attr(crossbasis_unpen, "basislag")
+  
+  y_all <- na.omit(y_all)
+  
+  INLA_formula <- y_all ~ crossbasis_unpen_clean +
+    f(ID_Laplace, model= "bym2", graph = "output/adjacency.mat", scale.model = T)
+  data_INLA = data.frame(y_all = y_all, crossbasis_unpen_clean = crossbasis_unpen_clean, ID_Laplace = ID_Laplace,
+                         offset_INLA = offset_INLA)
+  
+  mtime <- proc.time()
+  model_INLA <- inla(formula = INLA_formula, data = data_INLA, family = "poisson", offset = log(offset_INLA),
+                     control.fixed = list(correlation.matrix = T),
+                     control.predictor = list(link = 1, compute = T))
+  
+  time_INLA[i] <- (proc.time()-mtime)[3]
+  
+  
+  coef_INLA <- model_INLA$summary.fixed$mean
+  vcov_INLA <- model_INLA$misc$lincomb.derived.covariance.matrix
+  indt_INLA <- (1:(dim(crossbasis_unpen_clean)[2]+1))[-1]  
+  
+  pred_INLA <- crosspred(basis = crossbasis_unpen_clean, coef = coef_INLA[indt_INLA], 
+                         vcov = vcov_INLA[indt_INLA, indt_INLA], at = seq(0,10,0.25),
+                         cen = cen, lag=L, bylag=1)
+  # STORE THE RESULTS
+  bias_INLA <- bias_INLA+ (pred_INLA$matfit-trueeff[[ind]])
+  cov_INLA <- cov_INLA + (trueeff[[ind]] >= pred_INLA$matfit-qn*pred_INLA$matse &
+                            trueeff[[ind]] <= pred_INLA$matfit+qn*pred_INLA$matse)
+  rmse_INLA <- rmse_INLA+(pred_INLA$matfit-trueeff[[ind]])^2
+  
+  cov_all_INLA <- cov_all_INLA + (apply(trueeff[[ind]],1,sum) >= pred_INLA$allfit-qn*pred_INLA$allse &
+                                    apply(trueeff[[ind]],1,sum) <= pred_INLA$allfit+qn*pred_INLA$allse)
+  rmse_all_INLA <- rmse_all_INLA + (pred_INLA$allfit-apply(trueeff[[ind]],1,sum))^2
+  
+  pred_delayvar_INLA <- pred_INLA$allfit
+  pred_INLA.meanx <- pred_INLA.meanx + pred_delayvar_INLA
+  
+  pred_atxvar_INLA <- pred_INLA$matfit[xind,]
+  pred_INLA.meanlag <- pred_INLA.meanlag + pred_atxvar_INLA
+  
+  if(i<=nsample) {
+    INLA_x[,i] <- pred_delayvar_INLA
+    INLA_lag[,i] <- pred_atxvar_INLA
+  }
+  
+  # Predict outcome
+  mu_pred_INLA <- model_INLA$summary.fitted.values$mean/offset_INLA
+  
+  Qlower_mu_INLA = model_INLA$summary.fitted.values$`0.025quant`/offset_INLA
+  Qupper_mu_INLA = model_INLA$summary.fitted.values$`0.975quant`/offset_INLA
+  
+  cov_mu_INLA = cov_mu_INLA + (mu_true >= Qlower_mu_INLA & mu_true <= Qupper_mu_INLA)
+  rmse_mu_INLA = rmse_mu_INLA + (mu_true - mu_pred_INLA)^2
+  
+  # Predict random effects
+  re_INLA <- model_INLA$summary.random$ID_Laplace$mean
+  Qlower_re_INLA = model_INLA$summary.random$ID_Laplace$`0.025quant`
+  Qupper_re_INLA = model_INLA$summary.random$ID_Laplace$`0.975quant`
+  
+  cov_re_INLA <- cov_re_INLA + (unique(re_true) >= unique(Qlower_re_INLA) & unique(re_true) <= unique(Qupper_re_INLA))
+  rmse_re_INLA <- rmse_re_INLA + (unique(re_true) - unique(re_INLA))^2
   
   
   
 }
 
 
-.#cor(na.omit(log(y_all+1)),log(predict(model_gam,type="response")+1))
+#cor(na.omit(log(y_all+1)),log(predict(model_gam,type="response")+1))
 
 
 results = data.frame(Metric = c("Bias", "Coverage", "Coverage all", "RMSE", "RMSE all",
@@ -429,7 +520,15 @@ results = data.frame(Metric = c("Bias", "Coverage", "Coverage all", "RMSE", "RMS
                              mean(sqrt(rmse_all_gam[seq(0,10,0.25)!=cen]/nsim)),
                              mean(cov_mu_gam/nsim), mean(sqrt(rmse_mu_gam/nsim)),
                              mean(cov_re_gam/nsim), mean(sqrt(rmse_re_gam/nsim)),
-                             mean(time_gam)))
+                             mean(time_gam)),
+                     INLA = c(mean(bias_INLA[seq(0,10,0.25)!=cen,]/nsim),
+                              mean((cov_INLA[seq(0,10,0.25)!=cen,]/nsim)),
+                              mean((cov_all_INLA[seq(0,10,0.25)!=cen]/nsim)),
+                              mean(sqrt(rmse_INLA[seq(0,10,0.25)!=cen,]/nsim)),
+                              mean(sqrt(rmse_all_INLA[seq(0,10,0.25)!=cen]/nsim)),
+                              mean(cov_mu_INLA/nsim), mean(sqrt(rmse_mu_INLA/nsim)),
+                              mean(cov_re_INLA/nsim), mean(sqrt(rmse_re_INLA/nsim)),
+                              mean(time_INLA)))
 print(results)
 
 summary(spatial_effect)
@@ -455,7 +554,13 @@ for (m in 2:(nsample)){
 lines(0:L, trueeff[[ind]][xind,], col="red", lty=2)
 lines(0:L, pred_gam.meanlag/nsim)
 
-
+plot(0:L,INLA_lag[,1],col=grey(0.8), type="l", ylim=c(-0.01,0.08),
+     xlab="lag", ylab="log RR", main=paste("INLA at x =", xvar))
+for (m in 2:(nsample)){
+  lines(0:L,INLA_lag[,m],col=grey(0.8))
+}
+lines(0:L, trueeff[[ind]][xind,], col="red", lty=2)
+lines(0:L, pred_INLA.meanlag/nsim)
 
 # overall estimate
 grid <- data.frame(x=rep(seq(0,10,0.25), each=41),lag=rep(0:40,41)) %>% mutate(result = do.call(combsim[ind], args=list(x,lag)))
@@ -477,3 +582,12 @@ for (m in 2:(nsample)){
 }
 lines(seq(0,10,0.25), apply(trueeff,1,sum), col="red", lty=2)
 lines(seq(0,10,0.25), pred_gam.meanx/nsim)
+
+
+plot(seq(0,10,0.25),INLA_x[,1],col=grey(0.8), type="l", ylim=c(-0.3,0.8),
+     xlab="var", ylab="log RR", main="INLA overall risk")
+for (m in 2:(nsample)){
+  lines(seq(0,10,0.25),INLA_x[,m],col=grey(0.8))
+}
+lines(seq(0,10,0.25), apply(trueeff,1,sum), col="red", lty=2)
+lines(seq(0,10,0.25), pred_INLA.meanx/nsim)

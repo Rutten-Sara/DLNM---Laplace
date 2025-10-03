@@ -3,7 +3,7 @@ rm(list = ls())
 source('DLNM_Laplace.R')
 source('predRR.R')
 
-library(dlnm);library(mgcv)
+library(dlnm);library(mgcv); library(INLA)
 
 # DEFINE THE EXPOSURE
 
@@ -58,59 +58,6 @@ fcumeff <- function(hist,lag,fun) sum(do.call(fun,list(hist,lag)))
 ind = 1
 cumeff <- apply(Q,1,fcumeff,0:40,combsim[ind])
 
-# Plotting the surfaces
-library(plot3D)
-
-pdf("scenarios.pdf",height=4,width=12)
-
-layout(matrix(1:3,ncol=3,byrow=TRUE))
-par(mar=c(1,1,3,1))
-
-# scenario 1
-df = data.frame(x = rep(seq(0,10,0.25)), y = rep(0:40, each = 41))
-
-dens <- akima::interp(x = df$x, 
-                      y = df$y, 
-                      z = trueeff[[1]], 
-                      duplicate = "mean", linear=FALSE,
-                      xo=seq(min(df$x), max(df$x), length = 200),
-                      yo=seq(min(df$y), max(df$y), length = 200))
-persp3D(x=dens$x, y=dens$y, z=dens$z,ticktype="detailed",theta=230,
-        ltheta=200,phi=30,lphi=30,xlab="exposure",ylab="lag",zlab="log-RR", zlim=c(-0.005,0.02),
-        nticks = 4,cex.main = 2,
-        shade = 0.75,r=sqrt(3),d=5,cex.axis=1.2, cex.lab=2,border=NA,
-        col="steelblue", main = "Plane")
-
-# scenario 2
-dens <- akima::interp(x = df$x, 
-                      y = df$y, 
-                      z = trueeff[[2]], 
-                      duplicate = "mean", linear= T,
-                      xo=seq(min(df$x), max(df$x), length = 200),
-                      yo=seq(min(df$y), max(df$y), length = 200))
-persp3D(x=dens$x, y=dens$y, z=dens$z,ticktype="detailed",theta=230,
-        ltheta=200,phi=30,lphi=30,xlab="exposure",ylab="lag",zlab="log-RR", zlim=c(-0.005,0.10),
-        nticks = 4,cex.main = 2,
-        shade = 0.75,r=sqrt(3),d=5,cex.axis=1.2, cex.lab=2,border=NA,
-        col="steelblue", main = "Temp")
-
-
-# scenario 3
-
-dens <- akima::interp(x = df$x, 
-                      y = df$y, 
-                      z = trueeff[[3]], 
-                      duplicate = "mean", linear=FALSE,
-                      xo=seq(min(df$x), max(df$x), length = 200),
-                      yo=seq(min(df$y), max(df$y), length = 200))
-persp3D(x=dens$x, y=dens$y, z=dens$z, ticktype="detailed",theta=230,
-        ltheta=200,phi=30,lphi=30,xlab="exposure",ylab="lag",zlab="log-RR", zlim=c(-0.001,0.025),
-        nticks = 4,cex.main = 2,
-        shade = 0.75,r=sqrt(3),d=5,cex.axis=1.2, cex.lab=2,border=NA,
-        col="steelblue", main = "Complex")
-
-
-dev.off()
 
 # NUMBER OF ITERATIONS 
 nsim <- 500
@@ -145,11 +92,25 @@ time_gam <- NULL
 cov_mu_gam <- rmse_mu_gam <- numeric(sum(!is.na(cumeff)))
 
 
+bias_INLA <- matrix(0,ncol=dim(trueeff[[ind]])[2], nrow=dim(trueeff[[ind]])[1])
+cov_INLA <- matrix(0,ncol=dim(trueeff[[ind]])[2], nrow=dim(trueeff[[ind]])[1])
+rmse_INLA <- matrix(0,ncol=dim(trueeff[[ind]])[2], nrow=dim(trueeff[[ind]])[1])
+cov_all_INLA <- rep(0,dim(trueeff$Temperature)[1])
+rmse_all_INLA <- rep(0,dim(trueeff$Temperature)[1])
+time_INLA <- NULL
+cov_mu_INLA <- rmse_mu_INLA <- numeric(sum(!is.na(cumeff)))
+
+
 # Plots
-pred_Laplace.meanx <- pred_gam.meanx <- rep(0,length(seq(0,10,0.25) ))
-pred_Laplace.meanlag <- pred_gam.meanlag <- rep(0,L+1)
-Laplace_x <- gam_x <- matrix(0,ncol=nsample, nrow=length(seq(0,10,0.25) ))
-Laplace_lag <- gam_lag <- matrix(0,ncol=nsample, nrow=L+1)
+pred_Laplace.meanx <- pred_gam.meanx <- pred_INLA.meanx <- rep(0,length(seq(0,10,0.25) ))
+pred_Laplace.meanlag <- pred_gam.meanlag <- pred_INLA.meanlag <- rep(0,L+1)
+Laplace_x <- gam_x <- INLA_x <- matrix(0,ncol=nsample, nrow=length(seq(0,10,0.25) ))
+Laplace_lag <- gam_lag <- INLA_lag <- matrix(0,ncol=nsample, nrow=L+1)
+
+
+# Knots INLA
+knots_vx <- quantile(x, probs = c(0.25,0.5,0.75))
+knots_vl <- logknots(0:L, nk = 2)
 
 
 for (i in 1:nsim){
@@ -281,6 +242,69 @@ for (i in 1:nsim){
   rmse_mu_gam = rmse_mu_gam + (mu_true - mu_pred)^2
   
   
+  # Results INLA (unpenalized)
+  crossbasis_unpen <- crossbasis(x, argvar=list(knots=knots_vx, fun="bs", intercept=F),
+                           arglag=list(knots=knots_vl, fun="bs",intercept=T), lag=L)
+  y_all[which(is.na(crossbasis_unpen[, 1]))] <- NA
+  
+  crossbasis_unpen_clean <- na.omit(crossbasis_unpen)
+  class(crossbasis_unpen_clean) <- class(crossbasis_unpen)
+  attr(crossbasis_unpen_clean, "argvar") <- attr(crossbasis_unpen, "argvar")
+  attr(crossbasis_unpen_clean, "arglag") <- attr(crossbasis_unpen, "arglag")
+  attr(crossbasis_unpen_clean, "basisvar") <- attr(crossbasis_unpen, "basisvar")
+  attr(crossbasis_unpen_clean, "basislag") <- attr(crossbasis_unpen, "basislag")
+  
+  y_all <- na.omit(y_all)
+  
+  INLA_formula <- y_all ~ crossbasis_unpen_clean
+  data_INLA = data.frame(y_all = y_all, crossbasis_unpen_clean = crossbasis_unpen_clean)
+  
+  mtime <- proc.time()
+  model_INLA <- inla(formula = INLA_formula, data = data_INLA, family = "poisson",
+                     control.fixed = list(correlation.matrix = T),
+                     control.predictor = list(link = 1, compute = T))
+  
+  time_INLA[i] <- (proc.time()-mtime)[3]
+  
+  
+  coef_INLA <- model_INLA$summary.fixed$mean
+  vcov_INLA <- model_INLA$misc$lincomb.derived.covariance.matrix
+  indt_INLA <- (1:length(coef_INLA))[-1]
+  
+  
+  pred_INLA <- crosspred(basis = crossbasis_unpen_clean, coef = coef_INLA[indt_INLA], 
+                         vcov = vcov_INLA[indt_INLA, indt_INLA], at = seq(0,10,0.25),
+                        cen = cen, lag=L, bylag=1, model.link = "log")
+  # STORE THE RESULTS
+  bias_INLA <- bias_INLA+ (pred_INLA$matfit-trueeff[[ind]])
+  cov_INLA <- cov_INLA + (trueeff[[ind]] >= pred_INLA$matfit-qn*pred_INLA$matse &
+                          trueeff[[ind]] <= pred_INLA$matfit+qn*pred_INLA$matse)
+  rmse_INLA <- rmse_INLA+(pred_INLA$matfit-trueeff[[ind]])^2
+  
+  cov_all_INLA <- cov_all_INLA + (apply(trueeff[[ind]],1,sum) >= pred_INLA$allfit-qn*pred_INLA$allse &
+                                  apply(trueeff[[ind]],1,sum) <= pred_INLA$allfit+qn*pred_INLA$allse)
+  rmse_all_INLA <- rmse_all_INLA + (pred_INLA$allfit-apply(trueeff[[ind]],1,sum))^2
+  
+  pred_delayvar_INLA <- pred_INLA$allfit
+  pred_INLA.meanx <- pred_INLA.meanx + pred_delayvar_INLA
+  
+  pred_atxvar_INLA <- pred_INLA$matfit[xind,]
+  pred_INLA.meanlag <- pred_INLA.meanlag + pred_atxvar_INLA
+  
+  if(i<=nsample) {
+    INLA_x[,i] <- pred_delayvar_INLA
+    INLA_lag[,i] <- pred_atxvar_INLA
+  }
+  
+  # Predict outcome
+  mu_pred_INLA <- model_INLA$summary.fitted.values$mean
+
+  Qlower_mu_INLA = model_INLA$summary.fitted.values$`0.025quant`
+  Qupper_mu_INLA = model_INLA$summary.fitted.values$`0.975quant`
+  
+  cov_mu_INLA = cov_mu_INLA + (mu_true >= Qlower_mu_INLA & mu_true <= Qupper_mu_INLA)
+  rmse_mu_INLA = rmse_mu_INLA + (mu_true - mu_pred_INLA)^2
+  
 }
 
 cor(log(y_all+1)[!is.na(crossbasis[,1])],log(predict(model_gam,type="response")+1))
@@ -300,7 +324,14 @@ results = data.frame(Metric = c("Bias", "Coverage", "Coverage all", "RMSE", "RMS
                              mean(sqrt(rmse_gam[seq(0,10,0.25)!=cen,]/nsim)),
                              mean(sqrt(rmse_all_gam[seq(0,10,0.25)!=cen]/nsim)),
                              mean(cov_mu_gam/nsim), mean(sqrt(rmse_mu_gam/nsim)),
-                             mean(time_gam)))
+                             mean(time_gam)),
+                     INLA = c(mean(bias_INLA[seq(0,10,0.25)!=cen,]/nsim),
+                             mean((cov_INLA[seq(0,10,0.25)!=cen,]/nsim)),
+                             mean((cov_all_INLA[seq(0,10,0.25)!=cen]/nsim)),
+                             mean(sqrt(rmse_INLA[seq(0,10,0.25)!=cen,]/nsim)),
+                             mean(sqrt(rmse_all_INLA[seq(0,10,0.25)!=cen]/nsim)),
+                             mean(cov_mu_INLA/nsim), mean(sqrt(rmse_mu_INLA/nsim)),
+                             mean(time_INLA)))
 
 
 print(results)
@@ -328,7 +359,13 @@ for (m in 2:(nsample)){
 lines(0:L, trueeff[[ind]][xind,], col="red", lty=2)
 lines(0:L, pred_gam.meanlag/nsim)
 
-
+plot(0:L,INLA_lag[,1],col=grey(0.8), type="l", ylim=c(-0.01,0.08),
+     xlab="lag", ylab="log RR", main=paste("INLA at x =", xvar))
+for (m in 2:(nsample)){
+  lines(0:L,INLA_lag[,m],col=grey(0.8))
+}
+lines(0:L, trueeff[[ind]][xind,], col="red", lty=2)
+lines(0:L, pred_INLA.meanlag/nsim)
 
 
 # overall estimate
@@ -350,6 +387,15 @@ for (m in 2:(nsample)){
 }
 lines(seq(0,10,0.25), apply(trueeff,1,sum), col="red", lty=2)
 lines(seq(0,10,0.25), pred_gam.meanx/nsim)
+
+
+plot(seq(0,10,0.25),INLA_x[,1],col=grey(0.8), type="l", ylim=c(-0.3,0.8),
+     xlab="var", ylab="log RR", main="INLA overall risk")
+for (m in 2:(nsample)){
+  lines(seq(0,10,0.25),INLA_x[,m],col=grey(0.8))
+}
+lines(seq(0,10,0.25), apply(trueeff,1,sum), col="red", lty=2)
+lines(seq(0,10,0.25), pred_INLA.meanx/nsim)
 #########################################
 ######################################
 
