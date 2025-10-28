@@ -218,8 +218,8 @@ spat_sim <- eigen$vectors %*% diag(sqrt(eigen$values),S) %*% t(X)
 offset_true = ceiling(rgamma(length(unique(datafull$MSOA11CD)),1,0.05))
 
 adj.file <- "output/adjacency.mat"
+if (!file.exists(adj.file)) nb2INLA(adj.file, neig.map)
 adj_INLA <- nb2INLA(adj.file, neig.map)
-
 
 # Knots INLA
 knots_vx <- quantile(x, probs = c(0.5,0.9))
@@ -591,3 +591,4 @@ for (m in 2:(nsample)){
 }
 lines(seq(0,10,0.25), apply(trueeff,1,sum), col="red", lty=2)
 lines(seq(0,10,0.25), pred_INLA.meanx/nsim)
+
