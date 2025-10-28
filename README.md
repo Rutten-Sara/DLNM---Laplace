@@ -1,8 +1,8 @@
-# Distributed lag non-linear models with Laplacian-P-splines for analysis of spatially structured time series
+# Penalized distributed lag non-linear models for small area data using Laplacian-P-splines
 Sara Rutten, Bryan Sumalinab, Oswaldo Gressani, Thomas Neyens, Elisa Duarte, Niel Hens and Christel Faes
 
 ## About this repository
-This repository contains Rcodes used to generate the results from the paper "Distributed lag non-linear models with Laplacian-P-splines for analysis of spatially structured time series".
+This repository contains Rcodes used to generate the results from the paper "Penalized distributed lag non-linear models for small area data using Laplacian-P-splines".
 
 ## Data
 Following datasets are necessary to run the code and are included in the data folder:
